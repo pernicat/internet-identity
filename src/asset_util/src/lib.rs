@@ -403,8 +403,21 @@ fn collect_assets_from_dir(dir: &Dir, html_transformer: Option<fn(&str) -> Strin
     let mut assets: Vec<Asset> = vec![];
     for asset in dir.files() {
         let file_bytes = asset.contents().to_vec();
-        let (content, encoding, content_type) = match file_extension(asset) {
+        let (base_name, last_extension) = file_name_parts(file_name(asset));
+        let (content, encoding, content_type) = match last_extension {
             "css" => (file_bytes, ContentEncoding::Identity, ContentType::CSS),
+            "gz" => {
+                let (_, base_extension) = file_name_parts(base_name);
+                match base_extension {
+                    "js" => (file_bytes, ContentEncoding::GZip, ContentType::JS),
+                    "woff2" => (file_bytes, ContentEncoding::GZip, ContentType::WOFF2),
+                    ext => panic!(
+                        "Unknown asset type '{}.gz' for asset '{}'",
+                        ext,
+                        asset.path().display()
+                    ),
+                }
+            }
             "html" => {
                 if let Some(transformer) = html_transformer {
                     let content = transformer(std::str::from_utf8(&file_bytes).unwrap());
@@ -417,12 +430,10 @@ fn collect_assets_from_dir(dir: &Dir, html_transformer: Option<fn(&str) -> Strin
             "ico" => (file_bytes, ContentEncoding::Identity, ContentType::ICO),
             "json" => (file_bytes, ContentEncoding::Identity, ContentType::JSON),
             "js" => (file_bytes, ContentEncoding::Identity, ContentType::JS),
-            "js.gz" => (file_bytes, ContentEncoding::GZip, ContentType::JS),
             "png" => (file_bytes, ContentEncoding::Identity, ContentType::PNG),
             "svg" => (file_bytes, ContentEncoding::Identity, ContentType::SVG),
             "webp" => (file_bytes, ContentEncoding::Identity, ContentType::WEBP),
             "woff2" => (file_bytes, ContentEncoding::Identity, ContentType::WOFF2),
-            "woff2.gz" => (file_bytes, ContentEncoding::GZip, ContentType::WOFF2),
             ext => panic!(
                 "Unknown asset type '{}' for asset '{}'",
                 ext,
@@ -450,21 +461,20 @@ fn collect_assets_from_dir(dir: &Dir, html_transformer: Option<fn(&str) -> Strin
     assets
 }
 
-/// Returns the portion of the filename after the first dot.
-/// This corresponds to the file extension for the assets handled by this canister.
-///
-/// The builtin `extension` method on `Path` does not work for file extensions with multiple dots
-/// such as `.js.gz`.
-fn file_extension<'a>(asset: &'a File) -> &'a str {
+/// Extracts the file name from a path.
+fn file_name<'a>(asset: &'a File) -> &'a str {
     asset
         .path()
         .file_name()
         .unwrap()
         .to_str()
         .unwrap()
-        .split_once('.')
-        .unwrap()
-        .1
+}
+
+/// Splits a file name into the base name and extension.
+/// This is separate from the `file_name` function so it can be used with double file extensions like `file.css.gz`
+fn file_name_parts(file_name: &str) -> (&str, &str) {
+    file_name.rsplit_once('.').unwrap()
 }
 
 /// Returns the URL paths for a given asset filepath. For instance:
