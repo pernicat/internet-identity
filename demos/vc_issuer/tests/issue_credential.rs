@@ -16,7 +16,7 @@ use identity_core::common::Value;
 use identity_jose::jwt::JwtClaims;
 use internet_identity_interface::http_gateway::{HttpRequest, HttpResponse};
 use internet_identity_interface::internet_identity::types::vc_mvp::{
-    GetIdAliasRequest, GetIdAliasResponse, PrepareIdAliasRequest, PrepareIdAliasResponse,
+    GetIdAliasRequest, PrepareIdAliasRequest,
 };
 use internet_identity_interface::internet_identity::types::FrontendHostname;
 use lazy_static::lazy_static;
@@ -26,9 +26,8 @@ use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
 use vc_util::issuer_api::{
     ArgumentValue, CredentialSpec, GetCredentialRequest, GetCredentialResponse,
-    Icrc21ConsentMessageResponse, Icrc21ConsentPreferences, Icrc21Error,
-    Icrc21VcConsentMessageRequest, IssueCredentialError, PrepareCredentialRequest,
-    PrepareCredentialResponse, SignedIdAlias as SignedIssuerIdAlias,
+    Icrc21ConsentPreferences, Icrc21Error, Icrc21VcConsentMessageRequest, IssueCredentialError,
+    PrepareCredentialRequest, PrepareCredentialResponse, SignedIdAlias as SignedIssuerIdAlias,
 };
 use vc_util::{
     did_for_principal, get_verified_id_alias_from_jws, verify_credential_jws_with_canister_id,
@@ -92,6 +91,7 @@ pub fn install_issuer(env: &StateMachine, init: &IssuerInit) -> CanisterId {
 
 mod api {
     use super::*;
+    use vc_util::issuer_api::Icrc21ConsentInfo;
 
     pub fn configure(
         env: &StateMachine,
@@ -106,7 +106,7 @@ mod api {
         canister_id: CanisterId,
         sender: Principal,
         consent_message_request: &Icrc21VcConsentMessageRequest,
-    ) -> Result<Option<Icrc21ConsentMessageResponse>, CallError> {
+    ) -> Result<Result<Icrc21ConsentInfo, Icrc21Error>, CallError> {
         call_candid_as(
             env,
             canister_id,
@@ -204,11 +204,12 @@ fn should_return_vc_consent_message_for_employment_vc() {
         let response =
             api::vc_consent_message(&env, canister_id, principal_1(), &consent_message_request)
                 .expect("API call failed")
-                .expect("Got 'None' from vc_consent_message");
+                .expect("Consent message error");
 
-        match_value!(response, Icrc21ConsentMessageResponse::Ok(info));
-        assert_eq!(info.language, actual_language);
-        assert!(info.consent_message.starts_with(consent_message_snippet));
+        assert_eq!(response.language, actual_language);
+        assert!(response
+            .consent_message
+            .starts_with(consent_message_snippet));
     }
 }
 
@@ -238,10 +239,11 @@ fn should_return_vc_consent_message_for_adult_vc() {
         let response =
             api::vc_consent_message(&env, canister_id, principal_1(), &consent_message_request)
                 .expect("API call failed")
-                .expect("Got 'None' from vc_consent_message");
-        match_value!(response, Icrc21ConsentMessageResponse::Ok(info));
-        assert_eq!(info.language, actual_language);
-        assert!(info.consent_message.starts_with(consent_message_snippet));
+                .expect("Consent message error");
+        assert_eq!(response.language, actual_language);
+        assert!(response
+            .consent_message
+            .starts_with(consent_message_snippet));
     }
 }
 
@@ -262,12 +264,8 @@ fn should_fail_vc_consent_message_if_not_supported() {
 
     let response =
         api::vc_consent_message(&env, canister_id, principal_1(), &consent_message_request)
-            .expect("API call failed")
-            .expect("Got 'None' from vc_consent_message");
-    assert_matches!(
-        response,
-        Icrc21ConsentMessageResponse::Err(Icrc21Error::UnsupportedCanisterCall(_))
-    );
+            .expect("API call failed");
+    assert_matches!(response, Err(Icrc21Error::UnsupportedCanisterCall(_)));
 }
 
 #[test]
@@ -287,12 +285,8 @@ fn should_fail_vc_consent_message_if_missing_arguments() {
 
     let response =
         api::vc_consent_message(&env, canister_id, principal_1(), &consent_message_request)
-            .expect("API call failed")
-            .expect("Got 'None' from vc_consent_message");
-    assert_matches!(
-        response,
-        Icrc21ConsentMessageResponse::Err(Icrc21Error::UnsupportedCanisterCall(_))
-    );
+            .expect("API call failed");
+    assert_matches!(response, Err(Icrc21Error::UnsupportedCanisterCall(_)));
 }
 
 #[test]
@@ -315,12 +309,8 @@ fn should_fail_vc_consent_message_if_missing_required_argument() {
 
     let response =
         api::vc_consent_message(&env, canister_id, principal_1(), &consent_message_request)
-            .expect("API call failed")
-            .expect("Got 'None' from vc_consent_message");
-    assert_matches!(
-        response,
-        Icrc21ConsentMessageResponse::Err(Icrc21Error::UnsupportedCanisterCall(_))
-    );
+            .expect("API call failed");
+    assert_matches!(response, Err(Icrc21Error::UnsupportedCanisterCall(_)));
 }
 
 fn employee_credential_spec() -> CredentialSpec {
@@ -562,15 +552,10 @@ fn should_issue_credential_e2e() -> Result<(), CallError> {
         issuer: issuer.clone(),
     };
 
-    let prepare_response =
+    let prepared_id_alias =
         ii_api::prepare_id_alias(&env, ii_id, principal_1(), prepare_id_alias_req)?
-            .expect("Got 'None' from prepare_id_alias");
+            .expect("prepare id_alias failed");
 
-    let prepared_id_alias = if let PrepareIdAliasResponse::Ok(response) = prepare_response {
-        response
-    } else {
-        panic!("prepare id_alias failed")
-    };
     let canister_sig_pk =
         CanisterSigPublicKey::try_from(prepared_id_alias.canister_sig_pk_der.as_ref())
             .expect("failed parsing canister sig pk");
@@ -582,18 +567,8 @@ fn should_issue_credential_e2e() -> Result<(), CallError> {
         rp_id_alias_jwt: prepared_id_alias.rp_id_alias_jwt,
         issuer_id_alias_jwt: prepared_id_alias.issuer_id_alias_jwt,
     };
-    let id_alias_credentials =
-        match ii_api::get_id_alias(&env, ii_id, principal_1(), get_id_alias_req)?
-            .expect("Got 'None' from get_id_alias")
-        {
-            GetIdAliasResponse::Ok(credentials) => credentials,
-            GetIdAliasResponse::NoSuchCredentials(err) => {
-                panic!("{}", format!("failed to get id_alias credentials: {}", err))
-            }
-            GetIdAliasResponse::AuthenticationFailed(err) => {
-                panic!("{}", format!("failed authentication: {}", err))
-            }
-        };
+    let id_alias_credentials = ii_api::get_id_alias(&env, ii_id, principal_1(), get_id_alias_req)?
+        .expect("get id_alias failed");
 
     let root_pk_raw =
         extract_raw_root_pk_from_der(&env.root_key()).expect("Failed decoding IC root key.");
