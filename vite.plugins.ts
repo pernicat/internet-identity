@@ -78,6 +78,7 @@ export const replicaForwardPlugin = ({
     });
 
     server.middlewares.use((req, res, next) => {
+      console.log(`original_url: ${req.originalUrl}`);
       if (
         /* Deny requests to raw URLs, e.g. <canisterId>.raw.ic0.app to make sure that II always uses certified assets
          * to verify the alternative origins. */
@@ -94,6 +95,7 @@ export const replicaForwardPlugin = ({
       const host_ = req.headers["host"];
       if (isNullish(host_)) {
         // default handling
+        console.log("null host, skipping...")
         return next();
       }
 
@@ -125,11 +127,15 @@ export const replicaForwardPlugin = ({
         });
       };
 
-      const matchingRule = forwardRules.find((rule) =>
-        rule.hosts.includes(host)
-      );
+      const matchingRule = forwardRules.find((rule) => {
+        console.log(`rule: { canister: ${rule.canisterName}, hosts: [${rule.hosts.join(",")}] }`);
+        return rule.hosts.includes(host)
+      });
+
+      console.log(`matchingRule: ${matchingRule}`);
 
       if (!isNullish(matchingRule)) {
+        console.log("not nulllish rule");
         const canisterId = readCanisterId({
           canisterName: matchingRule.canisterName,
         });
@@ -143,6 +149,7 @@ export const replicaForwardPlugin = ({
           ? [subdomain_, domain_.join(".")]
           : [undefined, subdomain_];
 
+      console.log(`subdomain: ${subdomain}, domain: ${domain}`);
       if (
         nonNullish(forwardDomains) &&
         nonNullish(subdomain) &&
@@ -152,6 +159,7 @@ export const replicaForwardPlugin = ({
         ) /* fast check for principal-ish */
       ) {
         // Assume the principal-ish thing is a canister ID
+        console.log("Forwarding to", subdomain);
         return forwardToReplica({ canisterId: subdomain });
       }
 
@@ -167,6 +175,7 @@ export const replicaForwardPlugin = ({
         } catch {}
       }
 
+      console.log("default response");
       return next();
     });
   },

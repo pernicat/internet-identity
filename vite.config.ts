@@ -46,9 +46,9 @@ export default defineConfig(({ mode }: UserConfig): UserConfig => {
         // Bundle only english words in bip39.
         external: /.*\/wordlists\/(?!english).*\.json/,
         input: [
-          "src/frontend/index.html",
-          "src/frontend/faq.html",
-          "src/frontend/vc-flow/index.html",
+          "index.html",
+          "faq.html",
+          "vc-flow/index.html",
         ],
         output: {
           entryFileNames: `[name].js`,
