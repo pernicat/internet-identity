@@ -401,7 +401,14 @@ pub fn collect_assets(
 /// Collects all assets from the given directory.
 fn collect_assets_from_dir(dir: &Dir, html_transformer: Option<fn(&str) -> String>) -> Vec<Asset> {
     let mut assets: Vec<Asset> = vec![];
-    for asset in dir.files() {
+    let files = dir.files().filter(|file| {
+        match file_name(*file) {
+            ".gitignore" => false,
+            _ => true
+        }
+    });
+
+    for asset in files {
         let file_bytes = asset.contents().to_vec();
         let (base_name, last_extension) = file_name_parts(file_name(asset));
         let (content, encoding, content_type) = match last_extension {
